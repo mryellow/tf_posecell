@@ -56,9 +56,8 @@ excite_pdf = gen_pdf(1, dim, dim_mid)
 inhibit_pdf = gen_pdf(2, dim, dim_mid)
 
 # Roll the PDFs until aligned with current index and reshape
-# FIXME: PDF centre is `[0,0,0]` where center of posecells is `[3,3,3]`
-rolled_excite_pdf = tf.py_func(np.roll, [excite_pdf, (pose_input[2] * dim * dim) + (pose_input[1] * dim) + (pose_input[0] + 1)], tf.float32, name="roll_excite")
-rolled_inhibit_pdf = tf.py_func(np.roll, [inhibit_pdf, (pose_input[2] * dim * dim) + (pose_input[1] * dim) + (pose_input[0] + 1)], tf.float32, name="roll_inhibit")
+rolled_excite_pdf = tf.py_func(np.roll, [excite_pdf, ((pose_input[2]-dim/2) * dim * dim) + ((pose_input[1]-dim/2) * dim) + ((pose_input[0]-dim/2) + 1)], tf.float32, name="roll_excite")
+rolled_inhibit_pdf = tf.py_func(np.roll, [inhibit_pdf, ((pose_input[2]-dim/2) * dim * dim) + ((pose_input[1]-dim/2) * dim) + ((pose_input[0]-dim/2) + 1)], tf.float32, name="roll_inhibit")
 shaped_excite_pdf = tf.reshape(rolled_excite_pdf, shape, name="ExcitePDF")
 shaped_inhibit_pdf = tf.reshape(rolled_inhibit_pdf, shape, name="InhibitPDF")
 

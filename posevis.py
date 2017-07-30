@@ -103,9 +103,9 @@ class Window(pyglet.window.Window):
 		#self.buttons = buttons
 
 		self.dim = 7
-		self.x = 0
-		self.y = 0
-		self.z = 0
+		self.x = int(self.dim / 2)
+		self.y = int(self.dim / 2)
+		self.z = int(self.dim / 2)
 
 	def on_draw(self):
 		self.clear()
