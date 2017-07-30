@@ -55,6 +55,10 @@ view_decay = tf.Variable(tf.fill(shape, VT_ACTIVE_DECAY), name="ViewDecay")
 excite_pdf = gen_pdf(1, dim, dim_mid)
 inhibit_pdf = gen_pdf(2, dim, dim_mid)
 
+# FIXME: Moving the PDF to known location and using it to shape the normalisation rather than "spread" the energy.
+# To roll the PDF like this to spread for every position is a bit much.
+# Start with a smaller shape, perhaps can convolve it with TF somehow.
+
 # Roll the PDFs until aligned with current index and reshape
 rolled_excite_pdf = tf.py_func(np.roll, [excite_pdf, ((pose_input[2]-dim/2) * dim * dim) + ((pose_input[1]-dim/2) * dim) + ((pose_input[0]-dim/2) + 1)], tf.float32, name="roll_excite")
 rolled_inhibit_pdf = tf.py_func(np.roll, [inhibit_pdf, ((pose_input[2]-dim/2) * dim * dim) + ((pose_input[1]-dim/2) * dim) + ((pose_input[0]-dim/2) + 1)], tf.float32, name="roll_inhibit")
