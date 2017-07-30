@@ -69,23 +69,24 @@ tf.global_variables_initializer().run(session=sess)
 decay_current = view_decay[view_input[0], view_input[1], view_input[2]]
 decay_added = tf.assign(view_decay, tf.add(view_decay, VT_ACTIVE_DECAY))
 # Replace current view with original decay
-decay_update = tf.assign(view_decay, tf.scatter_nd_update(view_decay, [view_input], [decay_current]))
+decay_update = tf.scatter_nd_update(view_decay, [view_input], [decay_current])
 
 # Calculate energy given decay
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1047
-energy = tf.divide(PC_VT_INJECT_ENERGY * 1.0, tf.multiply(30.0, tf.subtract(30.0, tf.exp(tf.multiply(1.2, view_decay)))), name="CalcEnergy")
+energy = tf.divide(PC_VT_INJECT_ENERGY * 1.0, tf.multiply(30.0, tf.subtract(30.0, tf.exp(tf.multiply(1.2, decay_update)))), name="CalcEnergy")
 
 # Inject energy given by decay, across all indexes
 inject = tf.add(posecells, energy, name="Inject")
 
 # Slightly restore decay
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1063
-decay_restore = tf.assign(view_decay, tf.subtract(view_decay, PC_VT_RESTORE))
+decay_restore = tf.subtract(view_decay, PC_VT_RESTORE)
 
 # Limit decay to VT_ACTIVE_DECAY
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1065
-decay_applied = tf.subtract(view_decay, const_active_decay, name="DecayRestore")
-decay_limited = tf.where(tf.greater_equal(view_decay, const_active_decay), x=decay_applied, y=const_active_decay, name="DecayLimit")
+decay_applied = tf.subtract(decay_restore, const_active_decay, name="DecayRestore")
+decay_limited = tf.where(tf.greater_equal(decay_restore, const_active_decay), x=decay_applied, y=const_active_decay, name="DecayLimit")
+decay_update = tf.assign(view_decay, decay_limited)
 
 #inject = tf.scatter_nd_add(posecells, [pose_input], [energy], name="Inject")
 excite = tf.multiply(inject, shaped_excite_pdf, name="Excite")
@@ -98,7 +99,8 @@ norm_posecells = tf.realdiv(global_limited, tf.reduce_sum(global_limited), name=
 #norm_posecells = tf.realdiv(inhibit, tf.reduce_sum(inhibit), name="Norm")
 
 # Reassign
-process = norm_posecells
+process_posecells = norm_posecells
+process_decays = decay_update
 #process = tf.assign(posecells, norm_posecells, name="Process")
 
 def main(_):
@@ -112,7 +114,7 @@ def main(_):
     def update(dt):
         print(window.x, window.y, window.z)
 
-        res = sess.run([process], feed_dict={
+        res = sess.run([process_posecells, process_decays], feed_dict={
             pose_input: [window.x, window.y, window.z],
             view_input: [window.x, window.y, window.z]
         })
