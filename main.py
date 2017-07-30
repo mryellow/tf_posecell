@@ -93,6 +93,11 @@ decay_limited = tf.where(tf.greater_equal(decay_restore, const_active_decay), x=
 decay_update = tf.assign(view_decay, decay_limited)
 
 #inject = tf.scatter_nd_add(posecells, [pose_input], [energy], name="Inject")
+
+# FIXME: Because `shaped_excite_pdf` is tied to location, `excite` can't be called without a location.
+# FIXME: Should be looping `excite` even when no view is being injected
+# FIXME: `excite` should take every element and apply updates to those surrounding based on `shaped_excite_pdf`
+
 excite = tf.multiply(inject, shaped_excite_pdf, name="Excite")
 inhibit = tf.subtract(excite, tf.multiply(excite, shaped_inhibit_pdf), name="Inhibit")
 
