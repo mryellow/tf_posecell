@@ -9,7 +9,7 @@ from posevis import Window
 
 sess = tf.Session()
 
-dim      = 3
+dim      = 12
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
@@ -57,7 +57,7 @@ def gen_weights(pdf):
 
 # Roll the PDF until aligned with this cell
 def gen_weight(pdf, x, y, z):
-    res = np.roll(pdf, ((z-dim_mid) * dim * dim) + ((y-dim_mid) * dim) + ((z-dim_mid) + 1))
+    res = np.roll(pdf, ((z-dim_mid) * dim * dim) + ((y-dim_mid) * dim) + ((x-dim_mid) + 1))
     res = np.reshape(res, shape)
     return res
 
@@ -79,7 +79,7 @@ inhibi_weights = tf.constant(gen_weights(inhibi_pdf), dtype=tf.float32, name="We
 tf.global_variables_initializer().run(session=sess)
 
 # TODO: DEBUG
-#posecells_updated = tf.scatter_nd_update(posecells, [[0,0,0]], [1])
+#posecells_updated = tf.scatter_nd_update(posecells, [[dim_mid,dim_mid,dim_mid]], [2])
 
 ####################
 ## Excite/Inhibit ##
@@ -87,14 +87,14 @@ tf.global_variables_initializer().run(session=sess)
 
 # Local Excite
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
-excite = tf.squeeze(tf.tensordot(posecells_reshaped, excite_weights, axes=dim), name="Excite")
+excite = tf.squeeze(tf.tensordot(posecells_reshaped, excite_weights, axes=3), name="Excite")
 #res = sess.run(excite)
 #print('excite', res, res.shape)
 
 # Local Inhibit
 # FIXME: Reshape needed? Keep the shape and reshape once?
 excite_reshaped = tf.reshape(excite, [-1, 1, 1, dim, dim, dim])
-inhibi = tf.subtract(excite, tf.squeeze(tf.tensordot(excite_reshaped, inhibi_weights, axes=dim)), name="Inhibit")
+inhibi = tf.subtract(excite, tf.squeeze(tf.tensordot(excite_reshaped, inhibi_weights, axes=3)), name="Inhibit")
 #res = sess.run(inhibi)
 #print('inhibi', res, res.shape)
 
@@ -118,25 +118,47 @@ process = tf.assign(posecells, norm_posecells)
 
 # Add to decay, except for current view
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1043
-decay_bump = tf.scatter_nd_add(view_decay, [view_input], VT_ACTIVE_DECAY, name="DecayBump")
+decay_bump = tf.scatter_nd_add(view_decay, [view_input], [VT_ACTIVE_DECAY], name="DecayBump")
+#res = sess.run(decay_bump, feed_dict={
+#    view_input: [0, 0, 0]
+#})
+#print('decay_bump', res, res.shape)
 
 # Calculate energy given decay
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1047
-energy = tf.divide(PC_VT_INJECT_ENERGY * 1.0, tf.multiply(30.0, tf.subtract(30.0, tf.exp(tf.multiply(1.2, decay_bump)))), name="CalcEnergy")
+energy = tf.divide(
+    PC_VT_INJECT_ENERGY * 1.0,
+    tf.multiply(
+        30.0,
+        tf.subtract(
+            30.0,
+            tf.exp(
+                tf.multiply(
+                    1.2,
+                    decay_bump[view_input[0],view_input[1],view_input[2]]
+                )
+            )
+        )
+    ), name="CalcEnergy"
+)
+#res = sess.run(energy, feed_dict={
+#    view_input: [0, 0, 0]
+#})
+#print('energy', res, res.shape)
 
 # Inject energy given by decay, across all indexes
 # TODO: Prevent injection into recent view templates
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1038
-inject = tf.add(posecells, energy, name="Inject")
+inject = tf.scatter_nd_add(posecells, [view_input], [energy], name="Inject")
 
 # Slightly restore decay
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1063
-decay_restore = tf.subtract(inject, PC_VT_RESTORE, name="DecaySlightRestore")
+decay_restore = tf.subtract(decay_bump, PC_VT_RESTORE, name="DecaySlightRestore")
 
 # Limit decay to VT_ACTIVE_DECAY
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1065
 decay_applied = tf.subtract(decay_restore, VT_ACTIVE_DECAY, name="DecayRestore")
-decay_limited = tf.where(tf.greater_equal(decay_restore, VT_ACTIVE_DECAY), x=decay_applied, y=const_decay, name="DecayLimit")
+decay_limited = tf.where(tf.greater_equal(decay_applied, VT_ACTIVE_DECAY), x=decay_applied, y=const_decay, name="DecayLimit")
 on_view_template = tf.assign(view_decay, decay_limited)
 
 # TODO: Path integration `on_odo`
@@ -152,7 +174,7 @@ def main(_):
     def update(dt):
         #print(window.x, window.y, window.z)
 
-        # TODO: Do stuff
+        # Do stuff
         res = sess.run([process, on_view_template], feed_dict={
             view_input: [window.x, window.y, window.z]
         })
@@ -160,7 +182,7 @@ def main(_):
         # Re-scale between [0, 1] for rendering (transparency percentage)
         data = res[0]
         #data = []
-        print(data)
+        #print(data)
         max_activation = 0
         min_activation = 1
         for x in xrange(len(data)):
