@@ -64,8 +64,9 @@ def gen_weight(pdf, x, y, z):
     res = np.reshape(res, shape)
     return res
 
-
+pose_input = tf.placeholder(tf.int64, shape=in_shape, name="PoseInput")
 view_input = tf.placeholder(tf.int64, shape=in_shape, name="ViewInput")
+
 view_decay = tf.Variable(tf.fill(shape, VT_ACTIVE_DECAY), name="ViewDecay")
 posecells  = tf.Variable(tf.ones(shape, tf.float32), name="PoseCells")
 
@@ -115,10 +116,6 @@ norm_posecells = tf.realdiv(global_limited, tf.reduce_sum(global_limited), name=
 #res = sess.run(norm_posecells)
 #print('norm_posecells', res, res.shape)
 
-process = tf.assign(posecells, norm_posecells)
-#process = norm_posecells
-#process = None
-
 #########################
 ## Inject and Decay VT ##
 #########################
@@ -165,10 +162,17 @@ inject = tf.scatter_nd_add(posecells, [view_input], [energy], name="Inject")
 #decay_restore = tf.subtract(decay_bump, PC_VT_RESTORE, name="RestoreDecay")
 decay_restore = tf.assign(view_decay, tf.maximum(VT_ACTIVE_DECAY, tf.subtract(decay_bump, PC_VT_RESTORE)), name="RestoreDecay")
 
+
+#################
+## "Callbacks" ##
+#################
+
+process = tf.assign(posecells, norm_posecells)
+
 on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
 # TODO: Path integration `on_odo`
-on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [view_input], [1]), name="OnOdo")
+on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [pose_input], [1]), name="OnOdo")
 
 def main(_):
     writer = tf.summary.FileWriter("/tmp/tf_posecell_graph", sess.graph)
@@ -176,37 +180,49 @@ def main(_):
     res = None
 
     window = Window()
+    # So it knows when to wrap inputs
     window.dim = dim
 
-    window.last = None
-
-    #sess.run(on_odo, feed_dict={
-    #    view_input: [3, 3, 3]
-    #})
+    # Kickstart PoseCells
+    window.pose = [dim_mid, dim_mid, dim_mid]
+    window.view = [dim_mid, dim_mid, dim_mid]
+    window.pose_last = window.pose[:]
+    window.view_last = window.view[:]
+    sess.run(on_odo, feed_dict={
+        pose_input: window.pose
+    })
 
     def update(dt):
 
-        state = [window.x, window.y, window.z]
-
         # Do stuff
+        data = None
         tasks = []
-        # Prevent injection into recent view templates
-        if window.last == state:
-            tasks = [process] #
-        else:
-            print(state)
-            #tasks = [on_view_template, decay_restore, process] #
-            tasks = [on_odo, decay_restore, process] #
+        # TODO: Prevent injection into recent view templates
+
+        if window.pose_last != window.pose:
+            print('pose', window.pose)
+            tasks.append(on_odo)
+        if window.view_last != window.view:
+            print('view', window.view)
+            tasks.append(on_view_template)
+            tasks.append(decay_restore)
+
+        tasks.append(process)
 
         res = sess.run(tasks, feed_dict={
-            view_input: state
+            pose_input: window.pose,
+            view_input: window.view
         })
 
-        window.last = state
+        window.pose_last = window.pose[:]
+        window.view_last = window.view[:]
 
         # Re-scale between [0, 1] for rendering (transparency percentage)
-        data = res[0]
-        #print(data)
+        if res and len(res) > 0:
+            data = res[0]
+            print(data)
+        else:
+            return
 
         max_activation = 0
         min_activation = 1

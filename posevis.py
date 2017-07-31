@@ -102,10 +102,12 @@ class Window(pyglet.window.Window):
 		#	buttons[self.bindings[k]] = 0
 		#self.buttons = buttons
 
-		self.dim = 7
-		self.x = int(self.dim / 2)
-		self.y = int(self.dim / 2)
-		self.z = int(self.dim / 2)
+		self.dim = None
+		self.pose = [0,0,0]
+		self.view = [0,0,0]
+
+		self.pose_last = self.pose[:]
+		self.view_last = self.view[:]
 
 	def on_draw(self):
 		self.clear()
@@ -125,22 +127,22 @@ class Window(pyglet.window.Window):
 		binds = self.bindings
 		if k in binds:
 			if binds[k] == 'left':
-				self.x += 1
+				self.pose[0] += 1
 			if binds[k] == 'right':
-				self.x -= 1
+				self.pose[0] -= 1
 			if binds[k] == 'up':
-				self.y += 1
+				self.pose[1] += 1
 			if binds[k] == 'down':
-				self.y -= 1
+				self.pose[1] -= 1
 			if binds[k] == 'turn-left':
-				self.z += 1
+				self.pose[2] += 1
 			if binds[k] == 'turn-right':
-				self.z -= 1
+				self.pose[2] -= 1
 
-			self.x %= self.dim
-			self.y %= self.dim
-			self.z %= self.dim
-			#print('on_key_release', self.x, self.y, self.z)
+			self.pose[0] %= self.dim
+			self.pose[1] %= self.dim
+			self.pose[2] %= self.dim
+			#print('on_key_release', self.pose[0], self.pose[1], self.pose[2])
 			return True
 		return False
 
