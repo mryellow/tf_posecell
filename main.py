@@ -162,7 +162,6 @@ inject = tf.scatter_nd_add(posecells, [view_input], [energy], name="Inject")
 #decay_restore = tf.subtract(decay_bump, PC_VT_RESTORE, name="RestoreDecay")
 decay_restore = tf.assign(view_decay, tf.maximum(VT_ACTIVE_DECAY, tf.subtract(decay_bump, PC_VT_RESTORE)), name="RestoreDecay")
 
-
 #################
 ## "Callbacks" ##
 #################
@@ -171,7 +170,7 @@ process = tf.assign(posecells, norm_posecells)
 
 on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
-# TODO: Path integration `on_odo`
+# TODO: Path integration `on_odo` `path_integration(vtrans, vrot)`
 on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [pose_input], [1]), name="OnOdo")
 
 def main(_):
@@ -204,8 +203,9 @@ def main(_):
             tasks.append(on_odo)
         if window.view_last != window.view:
             print('view', window.view)
-            tasks.append(on_view_template)
-            tasks.append(decay_restore)
+
+        tasks.append(on_view_template)
+        tasks.append(decay_restore)
 
         tasks.append(process)
 
@@ -220,7 +220,7 @@ def main(_):
         # Re-scale between [0, 1] for rendering (transparency percentage)
         if res and len(res) > 0:
             data = res[0]
-            print(data)
+            #print(data)
         else:
             return
 

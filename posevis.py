@@ -95,7 +95,10 @@ class Window(pyglet.window.Window):
 			key.LEFT: 'left',
 			key.RIGHT: 'right',
 			key.UP: 'up',
-			key.DOWN: 'down'
+			key.DOWN: 'down',
+			key.I: 'vt1',
+			key.J: 'vt2',
+			key.L: 'vt3',
 		}
 		#buttons = {}
 		#for k in self.bindings:
@@ -138,6 +141,13 @@ class Window(pyglet.window.Window):
 				self.pose[2] += 1
 			if binds[k] == 'turn-right':
 				self.pose[2] -= 1
+
+			if binds[k] == 'vt1':
+				self.view = [1,1,1]
+			if binds[k] == 'vt2':
+				self.view = [3,4,5]
+			if binds[k] == 'vt3':
+				self.view = [6,6,6]
 
 			self.pose[0] %= self.dim
 			self.pose[1] %= self.dim
