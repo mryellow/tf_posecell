@@ -9,7 +9,7 @@ from posevis import Window
 
 sess = tf.Session()
 
-dim      = 7
+dim      = 14
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
@@ -57,7 +57,10 @@ def gen_weights(pdf):
 
 # Roll the PDF until aligned with this cell
 def gen_weight(pdf, x, y, z):
-    res = np.roll(pdf, ((z-dim_mid) * dim * dim) + ((y-dim_mid) * dim) + ((x-dim_mid) + 1))
+    # Fully connected
+    res = np.roll(pdf, ((x-dim_mid) * dim * dim) + ((y-dim_mid) * dim) + (z-dim_mid))
+    # TODO: Locally connected "Activity Packets"
+    # [[left, most, corner], [smaller, p, d, f]]
     res = np.reshape(res, shape)
     return res
 
@@ -84,6 +87,8 @@ tf.global_variables_initializer().run(session=sess)
 ####################
 ## Excite/Inhibit ##
 ####################
+
+# TODO: Sparse update from left most corner with smaller PDF "Activity Packet"
 
 # Local Excite
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
@@ -158,9 +163,9 @@ inject = tf.scatter_nd_add(posecells, [view_input], [energy], name="Inject")
 # Slightly restore decay and Limit to VT_ACTIVE_DECAY
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1063
 #decay_restore = tf.subtract(decay_bump, PC_VT_RESTORE, name="RestoreDecay")
-decay_restore = tf.maximum(VT_ACTIVE_DECAY, tf.subtract(decay_bump, PC_VT_RESTORE), name="RestoreDecay")
+decay_restore = tf.assign(view_decay, tf.maximum(VT_ACTIVE_DECAY, tf.subtract(decay_bump, PC_VT_RESTORE)), name="RestoreDecay")
 
-on_view_template = [tf.assign(posecells, inject, name="OnVT1"), tf.assign(view_decay, decay_restore, name="OnVT2")]
+on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
 # TODO: Path integration `on_odo`
 on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [view_input], [1]), name="OnOdo")
@@ -175,8 +180,11 @@ def main(_):
 
     window.last = None
 
+    #sess.run(on_odo, feed_dict={
+    #    view_input: [3, 3, 3]
+    #})
+
     def update(dt):
-        #print(window.x, window.y, window.z)
 
         state = [window.x, window.y, window.z]
 
@@ -184,10 +192,11 @@ def main(_):
         tasks = []
         # Prevent injection into recent view templates
         if window.last == state:
-            tasks = [process, view_decay]
+            tasks = [process] #
         else:
-            #print(state)
-            tasks = [on_odo, on_view_template, process] #on_view_template
+            print(state)
+            #tasks = [on_view_template, decay_restore, process] #
+            tasks = [on_odo, decay_restore, process] #
 
         res = sess.run(tasks, feed_dict={
             view_input: state
@@ -197,7 +206,7 @@ def main(_):
 
         # Re-scale between [0, 1] for rendering (transparency percentage)
         data = res[0]
-        print(data)
+        #print(data)
 
         max_activation = 0
         min_activation = 1
