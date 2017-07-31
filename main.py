@@ -9,7 +9,7 @@ from posevis import Window
 
 sess = tf.Session()
 
-dim      = 5
+dim      = 7
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
@@ -99,8 +99,9 @@ inhibi = tf.subtract(excite, tf.squeeze(tf.tensordot(excite_reshaped, inhibi_wei
 #print('inhibi', res, res.shape)
 
 # Global Inhibit
-global_applied = tf.subtract(inhibi, PC_GLOBAL_INHIB)
-global_limited = tf.where(tf.greater_equal(inhibi, PC_GLOBAL_INHIB), x=global_applied, y=const_zeros, name="GlobalInhibit")
+#global_applied = tf.subtract(inhibi, PC_GLOBAL_INHIB)
+#global_limited = tf.where(tf.greater_equal(inhibi, PC_GLOBAL_INHIB), x=global_applied, y=const_zeros, name="GlobalInhibit")
+global_limited = tf.maximum(0.0, tf.subtract(inhibi, PC_GLOBAL_INHIB))
 #res = sess.run(global_limited)
 #print('global_limited', res, res.shape)
 
@@ -154,22 +155,15 @@ energy = tf.maximum(
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1038
 inject = tf.scatter_nd_add(posecells, [view_input], [energy], name="Inject")
 
-# Slightly restore decay
+# Slightly restore decay and Limit to VT_ACTIVE_DECAY
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1063
-decay_restore = tf.subtract(decay_bump, PC_VT_RESTORE, name="RestoreDecay")
+#decay_restore = tf.subtract(decay_bump, PC_VT_RESTORE, name="RestoreDecay")
+decay_restore = tf.maximum(VT_ACTIVE_DECAY, tf.subtract(decay_bump, PC_VT_RESTORE), name="RestoreDecay")
 
-# Limit decay to VT_ACTIVE_DECAY
-# https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1065
-#decay_applied = tf.subtract(decay_restore, VT_ACTIVE_DECAY, name="DecayRestore")
-decay_limited = tf.where(tf.less(decay_restore, VT_ACTIVE_DECAY), x=const_decay, y=decay_restore, name="LimitDecay")
-#res = sess.run(decay_limited, feed_dict={
-#    view_input: [0, 0, 0]
-#})
-#print('decay_limited', res, res.shape)
-
-on_view_template = [tf.assign(posecells, inject), tf.assign(view_decay, decay_limited)]
+on_view_template = [tf.assign(posecells, inject, name="OnVT1"), tf.assign(view_decay, decay_restore, name="OnVT2")]
 
 # TODO: Path integration `on_odo`
+on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [view_input], [1]), name="OnOdo")
 
 def main(_):
     writer = tf.summary.FileWriter("/tmp/tf_posecell_graph", sess.graph)
@@ -192,7 +186,8 @@ def main(_):
         if window.last == state:
             tasks = [process, view_decay]
         else:
-            tasks = [process, on_view_template]
+            #print(state)
+            tasks = [on_odo, on_view_template, process] #on_view_template
 
         res = sess.run(tasks, feed_dict={
             view_input: state
