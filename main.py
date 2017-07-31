@@ -62,55 +62,84 @@ def gen_weight(pdf, x, y, z):
     return res
 
 
-posecells = tf.Variable(tf.ones(shape, tf.float64), name="PoseCells")
-
-# Initalise globals
-tf.global_variables_initializer().run(session=sess)
-
-# TODO: DEBUG
-posecells_updated = tf.scatter_nd_update(posecells, [[0,0,0]], [1])
+view_input = tf.placeholder(tf.int64, shape=in_shape, name="ViewInput")
+view_decay = tf.Variable(tf.fill(shape, VT_ACTIVE_DECAY), name="ViewDecay")
+posecells  = tf.Variable(tf.ones(shape, tf.float32), name="PoseCells")
 
 # Generate self-connection weights
 excite_pdf = gen_pdf(1)
 inhibi_pdf = gen_pdf(2)
 
-zeros = tf.zeros(shape, tf.float64, name="Zeros")
-excite_weights = tf.constant(gen_weights(excite_pdf), name="WeightsExcite")
-inhibi_weights = tf.constant(gen_weights(inhibi_pdf), name="WeightsInhibit")
-print('Generated: Weights')
+const_decay    = tf.fill(shape, VT_ACTIVE_DECAY, name="ConstGlobalDecay")
+const_zeros    = tf.zeros(shape, tf.float32, name="Zeros")
+excite_weights = tf.constant(gen_weights(excite_pdf), dtype=tf.float32, name="WeightsExcite")
+inhibi_weights = tf.constant(gen_weights(inhibi_pdf), dtype=tf.float32, name="WeightsInhibit")
+
+# Initalise globals
+tf.global_variables_initializer().run(session=sess)
+
+# TODO: DEBUG
+#posecells_updated = tf.scatter_nd_update(posecells, [[0,0,0]], [1])
+
+####################
+## Excite/Inhibit ##
+####################
 
 # Local Excite
-posecells_reshaped = tf.reshape(posecells_updated, [-1, 1, 1, dim, dim, dim])
+posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
 excite = tf.squeeze(tf.tensordot(posecells_reshaped, excite_weights, axes=dim), name="Excite")
-#excite = tf.assign(posecells, tf.add(posecells, tf.squeeze(tf.tensordot(posecells_reshaped, excite_weights, axes=dim))))
-res = sess.run(excite)
-print('excite', res, res.shape)
+#res = sess.run(excite)
+#print('excite', res, res.shape)
 
 # Local Inhibit
 # FIXME: Reshape needed? Keep the shape and reshape once?
 excite_reshaped = tf.reshape(excite, [-1, 1, 1, dim, dim, dim])
 inhibi = tf.subtract(excite, tf.squeeze(tf.tensordot(excite_reshaped, inhibi_weights, axes=dim)), name="Inhibit")
-#inhibi = tf.assign(posecells, tf.subtract(posecells, tf.squeeze(tf.tensordot(posecells_reshaped, inhibi_weights, axes=dim))), name="Inhibit")
-res = sess.run(inhibi)
-print('inhibi', res, res.shape)
+#res = sess.run(inhibi)
+#print('inhibi', res, res.shape)
 
 # Global Inhibit
 global_applied = tf.subtract(inhibi, PC_GLOBAL_INHIB)
-global_limited = tf.where(tf.greater_equal(inhibi, PC_GLOBAL_INHIB), x=global_applied, y=zeros, name="GlobalInhibit")
-res = sess.run(global_limited)
-print('global_limited', res, res.shape)
-
-#test = tf.greater_equal(inhibi, PC_GLOBAL_INHIB)
-#res = sess.run(test)
-#print('test', res, res.shape)
+global_limited = tf.where(tf.greater_equal(inhibi, PC_GLOBAL_INHIB), x=global_applied, y=const_zeros, name="GlobalInhibit")
+#res = sess.run(global_limited)
+#print('global_limited', res, res.shape)
 
 # Normalisation
 norm_posecells = tf.realdiv(global_limited, tf.reduce_sum(global_limited), name="Norm")
-res = sess.run(norm_posecells)
-print('norm_posecells', res, res.shape)
+#res = sess.run(norm_posecells)
+#print('norm_posecells', res, res.shape)
 
 process = tf.assign(posecells, norm_posecells)
 #process = None
+
+###########
+## Decay ##
+###########
+
+# Add to decay, except for current view
+# https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1043
+decay_bump = tf.scatter_nd_add(view_decay, [view_input], VT_ACTIVE_DECAY, name="DecayBump")
+
+# Calculate energy given decay
+# https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1047
+energy = tf.divide(PC_VT_INJECT_ENERGY * 1.0, tf.multiply(30.0, tf.subtract(30.0, tf.exp(tf.multiply(1.2, decay_bump)))), name="CalcEnergy")
+
+# Inject energy given by decay, across all indexes
+# TODO: Prevent injection into recent view templates
+# https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1038
+inject = tf.add(posecells, energy, name="Inject")
+
+# Slightly restore decay
+# https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1063
+decay_restore = tf.subtract(inject, PC_VT_RESTORE, name="DecaySlightRestore")
+
+# Limit decay to VT_ACTIVE_DECAY
+# https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1065
+decay_applied = tf.subtract(decay_restore, VT_ACTIVE_DECAY, name="DecayRestore")
+decay_limited = tf.where(tf.greater_equal(decay_restore, VT_ACTIVE_DECAY), x=decay_applied, y=const_decay, name="DecayLimit")
+on_view_template = tf.assign(view_decay, decay_limited)
+
+# TODO: Path integration `on_odo`
 
 def main(_):
     writer = tf.summary.FileWriter("/tmp/tf_posecell_graph", sess.graph)
@@ -124,10 +153,12 @@ def main(_):
         #print(window.x, window.y, window.z)
 
         # TODO: Do stuff
-        res = sess.run(process, feed_dict={})
+        res = sess.run([process, on_view_template], feed_dict={
+            view_input: [window.x, window.y, window.z]
+        })
 
         # Re-scale between [0, 1] for rendering (transparency percentage)
-        data = res
+        data = res[0]
         #data = []
         print(data)
         max_activation = 0
