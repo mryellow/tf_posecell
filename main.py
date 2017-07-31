@@ -179,7 +179,7 @@ def main(_):
     window = Window()
     window.dim = dim
 
-    window.last = [window.x, window.y, window.z]
+    window.last = None
 
     def update(dt):
         #print(window.x, window.y, window.z)
@@ -202,7 +202,7 @@ def main(_):
 
         # Re-scale between [0, 1] for rendering (transparency percentage)
         data = res[0]
-        #data = []
+        print(data)
 
         max_activation = 0
         min_activation = 1
