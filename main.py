@@ -75,8 +75,6 @@ posecells  = tf.Variable(tf.ones(shape, tf.float32), name="PoseCells")
 excite_pdf = gen_pdf(1)
 inhibi_pdf = gen_pdf(2)
 
-const_decay    = tf.fill(shape, VT_ACTIVE_DECAY, name="ConstGlobalDecay")
-const_zeros    = tf.zeros(shape, tf.float32, name="ConstZeros")
 excite_weights = tf.constant(gen_weights(excite_pdf), dtype=tf.float32, name="WeightsExcite")
 inhibi_weights = tf.constant(gen_weights(inhibi_pdf), dtype=tf.float32, name="WeightsInhibit")
 
@@ -91,12 +89,9 @@ tf.global_variables_initializer().run(session=sess)
 ####################
 
 # TODO: Sparse update from left most corner with smaller PDF "Activity Packet"
-# TODO: See if can define `indexes` for an update, in a way which wraps.
 
 # Local Excite
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
-print(sess.run(excite_weights).shape)
-exit()
 excite = tf.squeeze(tf.tensordot(posecells_reshaped, excite_weights, axes=3, name="Excite"))
 #res = sess.run(excite)
 #print('excite', res, res.shape)
@@ -109,8 +104,6 @@ inhibi = tf.subtract(excite, tf.squeeze(tf.tensordot(excite_reshaped, inhibi_wei
 #print('inhibi', res, res.shape)
 
 # Global Inhibit
-#global_applied = tf.subtract(inhibi, PC_GLOBAL_INHIB)
-#global_limited = tf.where(tf.greater_equal(inhibi, PC_GLOBAL_INHIB), x=global_applied, y=const_zeros, name="GlobalInhibit")
 global_limited = tf.maximum(0.0, tf.subtract(inhibi, PC_GLOBAL_INHIB))
 #res = sess.run(global_limited)
 #print('global_limited', res, res.shape)
@@ -184,45 +177,11 @@ process = tf.assign(posecells, norm_posecells)
 
 on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
-# TODO: Path integration `on_odo` `path_integration(vtrans, vrot)`
-path_input = tf.placeholder(tf.float32, shape=[1,], name="PathInput")
-trans_weights = tf.Variable(tf.zeros([2,2], tf.float32), name="WeightsPath")
-
-vtrans, vrot = path_input
-
-# TODO: Have `trans_weights` match `posecells` shape.
-#    given it's `z` for `trans_dir`
-#       calulate weights for `x` and `y` quadrants.
-#       each cell has sparse weights for itself and 3 x/y/ neighbours (with zero for others)
-#           they're the same weights on every square...
-#           sparse update them some other way then drawing the whole matrix of weights
-#               Even if sparse, it needs to be rolled to the correct position,
-#               perhaps just store sparse duplication on every cell
-
-# TODO: Pre-generate sin/cos pairs constant for each `z` i.e. `trans_dir`
-
-#trans_dir = #th index * size of each th in rad
-# FIXME: Make shape of `trans_dir` with 4 children?
-#trans_weights = [
-#        # weight_sw = vtrans * vtrans * cos(dir90) * sin(dir90);
-#        vtrans * vtrans * tf.cos(trans_dir) * tf.sin(trans_dir),
-#        # weight_se = vtrans * sin(dir90) * (1.0 - vtrans * cos(dir90));
-#        vtrans * tf.sin(trans_dir) * (1.0 - vtrans * tf.cos(trans_dir)),
-#        # weight_nw = vtrans * cos(dir90) * (1.0 - vtrans * sin(dir90));
-#        vtrans * tf.cos(trans_dir) * (1.0 - vtrans * tf.sin(trans_dir)),
-#        # weight_ne = 1.0 - weight_sw - weight_se - weight_nw;
-#        1.0
-#]#
-# Normalise
-#trans_weights[3] -= trans_weights[2] - trans_weights[1] - trans_weights[0]
-#path_section = [] # neighbours of current best?
-#path_energy = tf.tensordot(posecells[path_section], trans_weights)
-
-# TODO: Then `vrot`
-# posecells[k][j][i] = pca_new[newk1][j][i] * (1.0 - weight) + pca_new[newk2][j][i] * weight;
-
-on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [path_section], [path_energy]), name="OnOdo")
+#on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [path_section], [path_energy]), name="OnOdo")
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [pose_input], [1]), name="OnOdo")
+
+# Inject some energy at the start. (Why is this needed?)
+one_time = tf.assign(posecells, tf.scatter_nd_add(posecells, [dim_mid,dim_mid,dim_mid], [1]), name="OneTime")
 
 def main(_):
     writer = tf.summary.FileWriter("/tmp/tf_posecell_graph", sess.graph)
@@ -238,7 +197,7 @@ def main(_):
     window.view = [dim_mid, dim_mid, dim_mid]
     window.pose_last = window.pose[:]
     window.view_last = window.view[:]
-    sess.run(on_odo, feed_dict={
+    sess.run(one_time, feed_dict={
         pose_input: window.pose
     })
 
