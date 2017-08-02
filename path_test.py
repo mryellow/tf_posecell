@@ -24,15 +24,10 @@ def gen_trans_weights():
     cnt = 0
 
     for k in xrange(dim):
-        #res.append([])
+        trans_dir = k * th_size #th index * size of each th in rad
+
         for j in xrange(dim):
-            #res[k].append([])
             for i in xrange(dim):
-
-                # TODO:
-                # `i` or is it `k`, is z index for trans_dir
-                trans_dir = i * th_size #th index * size of each th in rad
-
                 weights = []
 
                 # weight_sw = vtrans * vtrans * cos(dir90) * sin(dir90);
@@ -107,8 +102,8 @@ trans_weights_dense = tf.sparse_to_dense(
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
 trans = tf.squeeze(tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Excite"))
 res = sess.run(trans, feed_dict={
-    vtrans: 10.0,
-    vrot: 10.0
+    vtrans: 1.0,
+    vrot: 1.0
 })
 print('trans', res, res.shape)
 
