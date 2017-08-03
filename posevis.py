@@ -109,6 +109,21 @@ class Window(pyglet.window.Window):
 		self.pose = [0,0,0]
 		self.view = [0,0,0]
 
+		# In ROS speak:
+		# odo->twist.twist.linear.x, odo->twist.twist.angular.z
+		# x in metres, scaled by `vtrans /= PC_CELL_X_SIZE;`
+		# z in rad
+		self.vtrans = {
+			'x': 0.0,
+			'y': 0.0,
+			'z': 0.0
+		}
+		self.vrot = {
+			'x': 0.0,
+			'y': 0.0,
+			'z': 0.0
+		}
+
 		self.pose_last = self.pose[:]
 		self.view_last = self.view[:]
 
@@ -129,18 +144,25 @@ class Window(pyglet.window.Window):
 	def on_key_release(self, k, m):
 		binds = self.bindings
 		if k in binds:
-			if binds[k] == 'left':
-				self.pose[0] += 1
-			if binds[k] == 'right':
-				self.pose[0] -= 1
+			#if binds[k] == 'left':
+			#	#self.pose[0] += 1
+			#	self.vrot['z'] -= 1
+			#if binds[k] == 'right':
+			#	#self.pose[0] -= 1
+			#	self.vrot['z'] += 1
 			if binds[k] == 'up':
-				self.pose[1] += 1
+				#self.pose[1] += 1
+				self.vtrans['x'] += 1
 			if binds[k] == 'down':
-				self.pose[1] -= 1
+				#self.pose[1] -= 1
+				# FIXME: Reverse direction o vrot
+				self.vtrans['x'] -= 1
 			if binds[k] == 'turn-left':
-				self.pose[2] += 1
+			#	self.pose[2] += 1
+				self.vrot['z'] -= 1
 			if binds[k] == 'turn-right':
-				self.pose[2] -= 1
+			#	self.pose[2] -= 1
+				self.vrot['z'] += 1
 
 			if binds[k] == 'vt1':
 				self.view = [1,1,1]

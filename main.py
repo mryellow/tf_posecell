@@ -9,15 +9,17 @@ from posevis import Window
 
 sess = tf.Session()
 
-dim      = 14
+dim      = 7
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
+th_size  = (2.0 * math.pi) / dim;
 
 PC_GLOBAL_INHIB = 0.00002
 PC_VT_INJECT_ENERGY = 0.15
 PC_VT_RESTORE = 0.05
 VT_ACTIVE_DECAY = 1.0
+PC_CELL_X_SIZE = 1.0
 
 def norm2d(var, x, y, z):
     return 1.0 / (var * math.sqrt(2.0 * math.pi)) \
@@ -163,11 +165,94 @@ decay_restore = tf.assign(view_decay, tf.maximum(VT_ACTIVE_DECAY, tf.subtract(de
 ## Path Integration ##
 ######################
 
-# % work out the weight contribution to the NE cell from the SW, NW, SE cells
-#take_from =
+vtrans = tf.placeholder(tf.float32, shape=[], name="vtransInput")
+vrot = tf.placeholder(tf.float32, shape=[], name="vrotInput")
 
-# multiple by the contributing weight
-#give_to =
+def gen_trans_weights():
+    val = []
+    idx = []
+    cnt = 0
+
+    vtranscell = tf.divide(vtrans, PC_CELL_X_SIZE)
+
+    for k in xrange(dim):
+        trans_dir = k * th_size #th index * size of each th in rad
+
+        for j in xrange(dim):
+            for i in xrange(dim):
+                weights = []
+
+                # Wrap edges
+                ii = i+1
+                if ii >= dim-1:
+                    ii = 0
+                jj = j+1
+                if jj >= dim-1:
+                    jj = 0
+
+                # weight_sw = vtranscell * vtranscell * cos(dir90) * sin(dir90);
+                weights.append(vtranscell * vtranscell * tf.cos(trans_dir) * tf.sin(trans_dir))
+                weight_val = weights[0]
+                weight_idx = [k,j,i,k,jj,ii]
+                idx.append(weight_idx)
+                val.append(weight_val)
+
+                # Wrap edges
+                jj = j+1
+                if jj >= dim-1:
+                    jj = 0
+
+                # weight_se = vtranscell * sin(dir90) * (1.0 - vtranscell * cos(dir90));
+                weights.append(vtranscell * tf.sin(trans_dir) * (1.0 - vtranscell * tf.cos(trans_dir)))
+                weight_val = weights[1]
+                weight_idx = [k,j,i,k,jj,i]
+                idx.append(weight_idx)
+                val.append(weight_val)
+
+                # Wrap edges
+                ii = i+1
+                if ii >= dim-1:
+                    ii = 0
+
+                # weight_nw = vtranscell * cos(dir90) * (1.0 - vtranscell * sin(dir90));
+                weights.append(vtranscell * tf.cos(trans_dir) * (1.0 - vtranscell * tf.sin(trans_dir)))
+                weight_val = weights[2]
+                weight_idx = [k,j,i,k,j,ii]
+                idx.append(weight_idx)
+                val.append(weight_val)
+
+                # weight_ne = 1.0 - weight_sw - weight_se - weight_nw;
+                weight_val = 1.0 - weights[2] - weights[1] - weights[0]
+                weight_idx = [k,j,i,k,j,i]
+                idx.append(weight_idx)
+                val.append(weight_val)
+
+    return idx, val
+
+trans_idx, trans_val = gen_trans_weights()
+
+trans_weights_dense = tf.sparse_to_dense(
+    sparse_indices=trans_idx,
+    output_shape=[dim, dim, dim, dim, dim, dim],
+    sparse_values=trans_val,
+    default_value=0,
+    validate_indices=False
+)
+#res = sess.run(trans_weights_dense, feed_dict={
+#    vtrans: 10.0,
+#    vrot: 10.0
+#})
+#print('trans_weights_dense', res, res.shape)
+
+# pca_new_rot_ptr[0][0] * weight_ne + pca_new_rot_ptr[0][PC_DIM_XY + 1] * weight_se + pca_new_rot_ptr[PC_DIM_XY + 1][0] * weight_nw;
+
+posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
+trans = tf.assign(posecells, tf.squeeze(tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Excite")))
+#res = sess.run(trans, feed_dict={
+#    vtrans: 1.0,
+#    vrot: 1.0
+#})
+#print('trans', res, res.shape)
 
 #################
 ## "Callbacks" ##
@@ -179,9 +264,10 @@ on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [path_section], [path_energy]), name="OnOdo")
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [pose_input], [1]), name="OnOdo")
+on_odo = trans
 
 # Inject some energy at the start. (Why is this needed?)
-one_time = tf.assign(posecells, tf.scatter_nd_add(posecells, [dim_mid,dim_mid,dim_mid], [1]), name="OneTime")
+one_time = tf.assign(posecells, tf.scatter_nd_add(posecells, [[dim_mid,dim_mid,dim_mid]], [1]), name="OneTime")
 
 def main(_):
     writer = tf.summary.FileWriter("/tmp/tf_posecell_graph", sess.graph)
@@ -208,20 +294,24 @@ def main(_):
         tasks = []
         # TODO: Prevent injection into recent view templates
 
-        if window.pose_last != window.pose:
-            print('pose', window.pose)
-            tasks.append(on_odo)
+        #if window.pose_last != window.pose:
+        #    print('pose', window.pose)
+        #    tasks.append(on_odo)
         if window.view_last != window.view:
             print('view', window.view)
 
-        tasks.append(on_view_template)
+        tasks.append(on_odo)
+        #tasks.append(on_view_template)
         tasks.append(decay_restore)
-
         tasks.append(process)
 
+        print('vel', window.vtrans['x'], window.vrot['z'])
+
         res = sess.run(tasks, feed_dict={
-            pose_input: window.pose,
-            view_input: window.view
+            #pose_input: window.pose,
+            view_input: window.view,
+            vtrans: window.vtrans['x'],
+            vrot: window.vrot['z']
         })
 
         window.pose_last = window.pose[:]
