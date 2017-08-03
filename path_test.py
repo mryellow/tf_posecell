@@ -70,7 +70,7 @@ def gen_trans_weights():
                     jj = 0
 
                 # weight_ne = 1.0 - weight_sw - weight_se - weight_nw;
-                weight_val = 1 - weights[2] - weights[1] - weights[0]
+                weight_val = 1.0 - weights[2] - weights[1] - weights[0]
                 weight_idx = [k,j,i,k,jj,ii]
                 idx.append(weight_idx)
                 val.append(weight_val)

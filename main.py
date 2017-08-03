@@ -9,7 +9,7 @@ from posevis import Window
 
 sess = tf.Session()
 
-dim      = 7
+dim      = 14
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
@@ -183,12 +183,12 @@ def gen_trans_weights():
                 weights = []
 
                 # Wrap edges
-                ii = i+1
-                if ii >= dim-1:
-                    ii = 0
-                jj = j+1
-                if jj >= dim-1:
-                    jj = 0
+                ii = i-1
+                if ii < 0:
+                    ii = dim-1
+                jj = j-1
+                if jj < 0:
+                    jj = dim-1
 
                 # weight_sw = vtranscell * vtranscell * cos(dir90) * sin(dir90);
                 weights.append(vtranscell * vtranscell * tf.cos(trans_dir) * tf.sin(trans_dir))
@@ -198,9 +198,9 @@ def gen_trans_weights():
                 val.append(weight_val)
 
                 # Wrap edges
-                jj = j+1
-                if jj >= dim-1:
-                    jj = 0
+                jj = j-1
+                if jj < 0:
+                    jj = dim-1
 
                 # weight_se = vtranscell * sin(dir90) * (1.0 - vtranscell * cos(dir90));
                 weights.append(vtranscell * tf.sin(trans_dir) * (1.0 - vtranscell * tf.cos(trans_dir)))
@@ -210,9 +210,9 @@ def gen_trans_weights():
                 val.append(weight_val)
 
                 # Wrap edges
-                ii = i+1
-                if ii >= dim-1:
-                    ii = 0
+                ii = i-1
+                if ii < 0:
+                    ii = dim-1
 
                 # weight_nw = vtranscell * cos(dir90) * (1.0 - vtranscell * sin(dir90));
                 weights.append(vtranscell * tf.cos(trans_dir) * (1.0 - vtranscell * tf.sin(trans_dir)))
@@ -247,7 +247,7 @@ trans_weights_dense = tf.sparse_to_dense(
 # pca_new_rot_ptr[0][0] * weight_ne + pca_new_rot_ptr[0][PC_DIM_XY + 1] * weight_se + pca_new_rot_ptr[PC_DIM_XY + 1][0] * weight_nw;
 
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
-trans = tf.assign(posecells, tf.squeeze(tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Excite")))
+trans = tf.squeeze(tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Translate"))
 #res = sess.run(trans, feed_dict={
 #    vtrans: 1.0,
 #    vrot: 1.0
@@ -264,7 +264,10 @@ on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [path_section], [path_energy]), name="OnOdo")
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [pose_input], [1]), name="OnOdo")
-on_odo = trans
+
+# FIXME: hmm `path_integration` is called after normalisation on the original.
+# FIXME: Why are weights blowing out? Instead of remaining normalised?
+on_odo = tf.assign(posecells, trans)
 
 # Inject some energy at the start. (Why is this needed?)
 one_time = tf.assign(posecells, tf.scatter_nd_add(posecells, [[dim_mid,dim_mid,dim_mid]], [1]), name="OneTime")
@@ -287,7 +290,10 @@ def main(_):
         pose_input: window.pose
     })
 
+    window.timestep = 0
+
     def update(dt):
+        window.timestep += 1
 
         # Do stuff
         data = None
@@ -300,9 +306,11 @@ def main(_):
         if window.view_last != window.view:
             print('view', window.view)
 
-        tasks.append(on_odo)
+
+        if window.timestep % 10 == 0:
+            tasks.append(on_odo)
         #tasks.append(on_view_template)
-        tasks.append(decay_restore)
+        #tasks.append(decay_restore)
         tasks.append(process)
 
         print('vel', window.vtrans['x'], window.vrot['z'])
@@ -311,8 +319,9 @@ def main(_):
             #pose_input: window.pose,
             view_input: window.view,
             vtrans: window.vtrans['x'],
-            vrot: window.vrot['z']
+            vrot: 45 * math.pi/180
         })
+        #window.vrot['z']
 
         window.pose_last = window.pose[:]
         window.view_last = window.view[:]
