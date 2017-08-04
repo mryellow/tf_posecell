@@ -47,6 +47,7 @@ def gen_pdf(var):
 
 # Weights for each PoseCell based on PDF
 def gen_weights(pdf):
+    print('Generating PDF weights...')
     res = []
     for k in xrange(dim):
         res.append([])
@@ -169,61 +170,100 @@ vtrans = tf.placeholder(tf.float32, shape=[], name="vtransInput")
 vrot = tf.placeholder(tf.float32, shape=[], name="vrotInput")
 
 def gen_trans_weights():
+    print('Generating Translation weights...')
     val = []
     idx = []
     cnt = 0
 
     vtranscell = tf.divide(vtrans, PC_CELL_X_SIZE)
 
+    # Z axis
     for k in xrange(dim):
-        trans_dir = k * th_size #th index * size of each th in rad
+        trans_dir = k * th_size #th index * size of each th in rad + angle_to_add (for reverse)
 
+        # Break down to one single quadrant
+        # `math.floor(trans_dir * 2 / math.pi)` gives number of quadrant.
+
+        # FIXME: Not rotating, so must implement each quadrant.
+        # FIXME: Currently each is fighting against the next.
+        trans_quad = math.floor(trans_dir * 2 / math.pi)
+        trans_dir = trans_dir - trans_quad * math.pi / 2
+
+        # Y axis
         for j in xrange(dim):
+            # X axis
             for i in xrange(dim):
                 weights = []
 
+                if trans_quad == 3.0:
+                    ne = [j, i]
+                    nw = [j-1, i]
+                    se = [j, i+1]
+                    sw = [j-1, i+1]
+                elif trans_quad == 2.0:
+                    ne = [j, i]
+                    nw = [j+1, i]
+                    se = [j+1, i]
+                    sw = [j+1, i+1]
+                elif trans_quad == 1.0:
+                    ne = [j, i]
+                    nw = [j+1, i]
+                    se = [j, i-1]
+                    sw = [j+1, i-1]
+                else:
+                    ne = [j, i]
+                    nw = [j, i-1]
+                    se = [j-1, i]
+                    sw = [j-1, i-1]
+
                 # Wrap edges
-                ii = i-1
-                if ii < 0:
-                    ii = dim-1
-                jj = j-1
-                if jj < 0:
-                    jj = dim-1
+                for card in xrange(len(ne)):
+                    if ne[card] < 0:
+                        ne[card] = dim-1
+                    if ne[card] > dim-1:
+                        ne[card] = 0
+                for card in xrange(len(nw)):
+                    if nw[card] < 0:
+                        nw[card] = dim-1
+                    if nw[card] > dim-1:
+                        nw[card] = 0
+                for card in xrange(len(se)):
+                    if se[card] < 0:
+                        se[card] = dim-1
+                    if se[card] > dim-1:
+                        se[card] = 0
+                for card in xrange(len(sw)):
+                    if sw[card] < 0:
+                        sw[card] = dim-1
+                    if sw[card] > dim-1:
+                        sw[card] = 0
+
+                # Note: At 45deg, 0.2 comes from either side and 0.5 from behind.
 
                 # weight_sw = vtranscell * vtranscell * cos(dir90) * sin(dir90);
                 weights.append(vtranscell * vtranscell * tf.cos(trans_dir) * tf.sin(trans_dir))
                 weight_val = weights[0]
-                weight_idx = [k,j,i,k,jj,ii]
+                weight_idx = [k,j,i,k,sw[0],sw[1]]
                 idx.append(weight_idx)
                 val.append(weight_val)
-
-                # Wrap edges
-                jj = j-1
-                if jj < 0:
-                    jj = dim-1
 
                 # weight_se = vtranscell * sin(dir90) * (1.0 - vtranscell * cos(dir90));
                 weights.append(vtranscell * tf.sin(trans_dir) * (1.0 - vtranscell * tf.cos(trans_dir)))
                 weight_val = weights[1]
-                weight_idx = [k,j,i,k,jj,i]
+                weight_idx = [k,j,i,k,se[0],se[1]]
                 idx.append(weight_idx)
                 val.append(weight_val)
-
-                # Wrap edges
-                ii = i-1
-                if ii < 0:
-                    ii = dim-1
 
                 # weight_nw = vtranscell * cos(dir90) * (1.0 - vtranscell * sin(dir90));
                 weights.append(vtranscell * tf.cos(trans_dir) * (1.0 - vtranscell * tf.sin(trans_dir)))
                 weight_val = weights[2]
-                weight_idx = [k,j,i,k,j,ii]
+                weight_idx = [k,j,i,k,nw[0],nw[1]]
                 idx.append(weight_idx)
                 val.append(weight_val)
 
                 # weight_ne = 1.0 - weight_sw - weight_se - weight_nw;
                 weight_val = 1.0 - weights[2] - weights[1] - weights[0]
-                weight_idx = [k,j,i,k,j,i]
+                weight_idx = [k,j,i,k,ne[0],ne[1]]
                 idx.append(weight_idx)
                 val.append(weight_val)
 
@@ -265,8 +305,6 @@ on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [path_section], [path_energy]), name="OnOdo")
 #on_odo = tf.assign(posecells, tf.scatter_nd_add(posecells, [pose_input], [1]), name="OnOdo")
 
-# FIXME: hmm `path_integration` is called after normalisation on the original.
-# FIXME: Why are weights blowing out? Instead of remaining normalised?
 on_odo = tf.assign(posecells, trans)
 
 # Inject some energy at the start. (Why is this needed?)
@@ -300,27 +338,33 @@ def main(_):
         tasks = []
         # TODO: Prevent injection into recent view templates
 
-        #if window.pose_last != window.pose:
-        #    print('pose', window.pose)
+        if window.pose_last != window.pose:
+            #print('pose', window.pose)
+            print('vel', window.vtrans['x'], window.vrot['z'])
         #    tasks.append(on_odo)
         if window.view_last != window.view:
             print('view', window.view)
 
 
-        if window.timestep % 10 == 0:
-            tasks.append(on_odo)
+        #if window.timestep % 10 == 0:
         #tasks.append(on_view_template)
         #tasks.append(decay_restore)
         tasks.append(process)
-
-        print('vel', window.vtrans['x'], window.vrot['z'])
+        tasks.append(on_odo)
 
         res = sess.run(tasks, feed_dict={
             #pose_input: window.pose,
             view_input: window.view,
             vtrans: window.vtrans['x'],
-            vrot: 45 * math.pi/180
+            #vrot: window.vrot['z']
         })
+
+        #res = sess.run(trans_weights_dense, feed_dict={
+        #    vtrans: window.vtrans['x'],
+        #    vrot: 45 * math.pi/180
+        #})
+        #print('trans_weights_dense', res, res.shape)
+
         #window.vrot['z']
 
         window.pose_last = window.pose[:]
@@ -338,13 +382,20 @@ def main(_):
         for x in xrange(len(data)):
             for y in xrange(len(data[x])):
                 for z in xrange(len(data[x][y])):
-                    max_activation = max(max_activation, data[x][y][z])
-                    min_activation = min(min_activation, data[x][y][z])
+                    if data[x][y][z] > 0:
+                        max_activation = max(max_activation, data[x][y][z])
+                        min_activation = min(min_activation, data[x][y][z])
+                    else:
+                        max_activation = max(max_activation, 0.0)
+                        min_activation = min(min_activation, 0.0)
 
         for x in xrange(len(data)):
             for y in xrange(len(data[x])):
                 for z in xrange(len(data[x][y])):
-                    data[x][y][z] = (data[x][y][z] - min_activation) / (max_activation - min_activation)
+                    if max_activation - min_activation > 0:
+                        data[x][y][z] = (data[x][y][z] - min_activation) / (max_activation - min_activation)
+                    else:
+                        data[x][y][z] = 0.0
 
         for x in xrange(len(data)):
             for y in xrange(len(data[x])):
