@@ -184,8 +184,6 @@ def gen_trans_weights():
         # Break down to one single quadrant
         # `math.floor(trans_dir * 2 / math.pi)` gives number of quadrant.
 
-        # FIXME: Not rotating, so must implement each quadrant.
-        # FIXME: Currently each is fighting against the next.
         trans_quad = math.floor(trans_dir * 2 / math.pi)
         trans_dir = trans_dir - trans_quad * math.pi / 2
 
@@ -195,7 +193,6 @@ def gen_trans_weights():
             for i in xrange(dim):
                 weights = []
 
-                # FIXME: Diverges at first... Just taking time to be normalised?
                 if trans_quad == 3.0:
                     ne = [j, i]
                     nw = [j-1, i]
@@ -281,17 +278,8 @@ def gen_rot_weights():
     # Convert to radians
     rads = tf.multiply(vrot, math.pi/180)
 
-    #weight = mod(abs(vrot)/pc.PC_C_SIZE_TH, 1);
     weight = tf.mod(tf.divide(tf.abs(rads), PC_C_SIZE_TH), 1)
-    #weight = tf.divide(tf.abs(rads), PC_C_SIZE_TH)
-    #cond = lambda i: tf.greater(i, 1.0)
-    #body = lambda i: tf.subtract(i, 1.0)
-    #tf.while_loop(cond, body, [weight])
     weight = tf.where(tf.equal(weight, 0.0), 1.0, weight)
-
-    #print(weight.eval(session=sess, feed_dict={
-    #    vrot: 1.0
-    #}))
 
     sign_vrot = tf.cond(rads < 0, lambda: 1.0, lambda: -1.0)
 
@@ -303,19 +291,9 @@ def gen_rot_weights():
     tf.while_loop(cond, body, [shifty1])
     tf.while_loop(cond, body, [shifty2])
 
-    #print(shifty1.eval(session=sess, feed_dict={
-    #    vrot: 1.0
-    #}))
-    #print(shifty2.eval(session=sess, feed_dict={
-    #    vrot: 1.0
-    #}))
-
     for k in xrange(dim):
         newk1 = tf.mod(tf.subtract(k, shifty1), dim)
         newk2 = tf.mod(tf.subtract(k, shifty2), dim)
-        #print(newk1.eval(session=sess, feed_dict={
-        #    vrot: 1.0
-        #}))
         for j in xrange(dim):
             for i in xrange(dim):
                 #posecells[k][j][i] = pca_new[newk1][j][i] * (1.0 - weight) + pca_new[newk2][j][i] * weight;
@@ -332,14 +310,7 @@ def gen_rot_weights():
 
     return idx, val
 
-rots_idx, rots_val = gen_rot_weights()
-#res = sess.run(rots_val, feed_dict={
-#    vtrans: 10.0,
-#    vrot: 45.0
-#})
-#print('rots_val', res) #, res.shape
-#exit()
-
+rots_idx, rots_val   = gen_rot_weights()
 trans_idx, trans_val = gen_trans_weights()
 
 trans_weights_dense = tf.sparse_to_dense(
@@ -357,17 +328,6 @@ rots_weights_dense = tf.sparse_to_dense(
     validate_indices=False
 )
 
-#path_weights_dense = tf.multiply(trans_weights_dense, rots_weights_dense)
-
-#res = sess.run(trans_weights_dense, feed_dict={
-#    vtrans: 10.0,
-#    vrot: 1.0
-#})
-#print('trans_weights_dense', res, res.shape)
-#exit()
-
-# pca_new_rot_ptr[0][0] * weight_ne + pca_new_rot_ptr[0][PC_DIM_XY + 1] * weight_se + pca_new_rot_ptr[PC_DIM_XY + 1][0] * weight_nw;
-
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
 translate = tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Translate")
 rotate    = tf.tensordot(translate, rots_weights_dense, axes=3, name="Rotate")
@@ -377,11 +337,6 @@ trans = tf.squeeze(rotate)
 #    vrot: 1.0
 #})
 #print('trans', res, res.shape)
-
-
-
-
-
 
 #################
 ## "Callbacks" ##
@@ -448,21 +403,12 @@ def main(_):
             vrot: window.vrot['z']
         })
 
-        #res = sess.run(path_weights_dense, feed_dict={
-        #    vtrans: window.vtrans['x'],
-        #    vrot: 45 * math.pi/180
-        #})
-        #print('path_weights_dense', res, res.shape)
-
-        #window.vrot['z']
-
         window.pose_last = window.pose[:]
         window.view_last = window.view[:]
 
         # Re-scale between [0, 1] for rendering (transparency percentage)
         if res and len(res) > 0:
             data = res[0]
-            #print(data)
         else:
             return
 
@@ -489,6 +435,7 @@ def main(_):
         for x in xrange(len(data)):
             for y in xrange(len(data[x])):
                 for z in xrange(len(data[x][y])):
+                    # TODO: Switch these axis around and draw axis in window
                     window.voxel.set(x, y, z, data[x][y][z])
 
     pyglet.clock.schedule(update)
