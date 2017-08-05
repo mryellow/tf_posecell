@@ -85,6 +85,9 @@ class Window(pyglet.window.Window):
 		self.voxel = VoxelEngine(20, 25, 20)
 		glClearColor(0.7, 0.7, 0.8, 1)
 
+		self.trans_accel = 0.2
+		self.rot_accel = 1.0
+
 		self.bindings = {
 			key.W: 'up',
 			key.S: 'down',
@@ -152,18 +155,18 @@ class Window(pyglet.window.Window):
 			#	self.vrot['z'] += 1
 			if binds[k] == 'up':
 				self.pose[1] += 1
-				self.vtrans['x'] += 1
+				self.vtrans['x'] += self.trans_accel
 			if binds[k] == 'down':
 				self.pose[1] -= 1
 				# FIXME: Reverse direction o vrot
 				if self.vtrans['x'] > 0:
-					self.vtrans['x'] -= 1
+					self.vtrans['x'] -= self.trans_accel
 			if binds[k] == 'turn-left':
 				self.pose[2] += 1
-				self.vrot['z'] -= 1
+				self.vrot['z'] -= self.rot_accel
 			if binds[k] == 'turn-right':
 				self.pose[2] -= 1
-				self.vrot['z'] += 1
+				self.vrot['z'] += self.rot_accel
 
 			if self.vrot['z'] > 359:
 				self.vrot['z'] = 0
@@ -176,6 +179,9 @@ class Window(pyglet.window.Window):
 				self.view = [3,4,5]
 			if binds[k] == 'vt3':
 				self.view = [6,6,6]
+
+			if self.vtrans['x'] < 0:
+				self.vtrans['x'] = 0
 
 			self.pose[0] %= self.dim
 			self.pose[1] %= self.dim

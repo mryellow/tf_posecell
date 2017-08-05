@@ -13,7 +13,7 @@ dim      = 14
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
-th_size  = (2.0 * math.pi) / dim;
+PC_C_SIZE_TH  = (2.0 * math.pi) / dim;
 
 PC_GLOBAL_INHIB = 0.00002
 PC_VT_INJECT_ENERGY = 0.15
@@ -166,8 +166,8 @@ decay_restore = tf.assign(view_decay, tf.maximum(VT_ACTIVE_DECAY, tf.subtract(de
 ## Path Integration ##
 ######################
 
+## Translation
 vtrans = tf.placeholder(tf.float32, shape=[], name="vtransInput")
-vrot = tf.placeholder(tf.float32, shape=[], name="vrotInput")
 
 def gen_trans_weights():
     print('Generating Translation weights...')
@@ -179,7 +179,7 @@ def gen_trans_weights():
 
     # Z axis
     for k in xrange(dim):
-        trans_dir = k * th_size #th index * size of each th in rad + angle_to_add (for reverse)
+        trans_dir = k * PC_C_SIZE_TH #th index * size of each th in rad + angle_to_add (for reverse)
 
         # Break down to one single quadrant
         # `math.floor(trans_dir * 2 / math.pi)` gives number of quadrant.
@@ -195,6 +195,7 @@ def gen_trans_weights():
             for i in xrange(dim):
                 weights = []
 
+                # FIXME: Diverges at first... Just taking time to be normalised?
                 if trans_quad == 3.0:
                     ne = [j, i]
                     nw = [j-1, i]
@@ -269,6 +270,76 @@ def gen_trans_weights():
 
     return idx, val
 
+## Rotation
+vrot = tf.placeholder(tf.float32, shape=[], name="vrotInput")
+
+def gen_rot_weights():
+    print('Generating Rotation weights...')
+    val = []
+    idx = []
+
+    # Convert to radians
+    rads = tf.multiply(vrot, math.pi/180)
+
+    #weight = mod(abs(vrot)/pc.PC_C_SIZE_TH, 1);
+    weight = tf.mod(tf.divide(tf.abs(rads), PC_C_SIZE_TH), 1)
+    #weight = tf.divide(tf.abs(rads), PC_C_SIZE_TH)
+    #cond = lambda i: tf.greater(i, 1.0)
+    #body = lambda i: tf.subtract(i, 1.0)
+    #tf.while_loop(cond, body, [weight])
+    weight = tf.where(tf.equal(weight, 0.0), 1.0, weight)
+
+    #print(weight.eval(session=sess, feed_dict={
+    #    vrot: 1.0
+    #}))
+
+    sign_vrot = tf.cond(rads < 0, lambda: 1.0, lambda: -1.0)
+
+    shifty1 = tf.cast(tf.multiply(sign_vrot, tf.floor(tf.divide(tf.abs(rads), PC_C_SIZE_TH))), dtype=tf.int32)
+    shifty2 = tf.cast(tf.multiply(sign_vrot, tf.ceil(tf.divide(tf.abs(rads), PC_C_SIZE_TH))), dtype=tf.int32)
+
+    cond = lambda i: tf.greater(i, 0)
+    body = lambda i: tf.subtract(i, dim)
+    tf.while_loop(cond, body, [shifty1])
+    tf.while_loop(cond, body, [shifty2])
+
+    #print(shifty1.eval(session=sess, feed_dict={
+    #    vrot: 1.0
+    #}))
+    #print(shifty2.eval(session=sess, feed_dict={
+    #    vrot: 1.0
+    #}))
+
+    for k in xrange(dim):
+        newk1 = tf.mod(tf.subtract(k, shifty1), dim)
+        newk2 = tf.mod(tf.subtract(k, shifty2), dim)
+        #print(newk1.eval(session=sess, feed_dict={
+        #    vrot: 1.0
+        #}))
+        for j in xrange(dim):
+            for i in xrange(dim):
+                #posecells[k][j][i] = pca_new[newk1][j][i] * (1.0 - weight) + pca_new[newk2][j][i] * weight;
+
+                weight_val = 1.0 - weight
+                weight_idx = [k,j,i,newk1,j,i]
+                idx.append(weight_idx)
+                val.append(weight_val)
+
+                weight_val = weight
+                weight_idx = [k,j,i,newk2,j,i]
+                idx.append(weight_idx)
+                val.append(weight_val)
+
+    return idx, val
+
+rots_idx, rots_val = gen_rot_weights()
+#res = sess.run(rots_val, feed_dict={
+#    vtrans: 10.0,
+#    vrot: 45.0
+#})
+#print('rots_val', res) #, res.shape
+#exit()
+
 trans_idx, trans_val = gen_trans_weights()
 
 trans_weights_dense = tf.sparse_to_dense(
@@ -278,21 +349,39 @@ trans_weights_dense = tf.sparse_to_dense(
     default_value=0,
     validate_indices=False
 )
+rots_weights_dense = tf.sparse_to_dense(
+    sparse_indices=rots_idx,
+    output_shape=[dim, dim, dim, dim, dim, dim],
+    sparse_values=rots_val,
+    default_value=0,
+    validate_indices=False
+)
+
+#path_weights_dense = tf.multiply(trans_weights_dense, rots_weights_dense)
+
 #res = sess.run(trans_weights_dense, feed_dict={
 #    vtrans: 10.0,
-#    vrot: 10.0
+#    vrot: 1.0
 #})
 #print('trans_weights_dense', res, res.shape)
+#exit()
 
 # pca_new_rot_ptr[0][0] * weight_ne + pca_new_rot_ptr[0][PC_DIM_XY + 1] * weight_se + pca_new_rot_ptr[PC_DIM_XY + 1][0] * weight_nw;
 
 posecells_reshaped = tf.reshape(posecells, [-1, 1, 1, dim, dim, dim])
-trans = tf.squeeze(tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Translate"))
+translate = tf.tensordot(posecells_reshaped, trans_weights_dense, axes=3, name="Translate")
+rotate    = tf.tensordot(translate, rots_weights_dense, axes=3, name="Rotate")
+trans = tf.squeeze(rotate)
 #res = sess.run(trans, feed_dict={
 #    vtrans: 1.0,
 #    vrot: 1.0
 #})
 #print('trans', res, res.shape)
+
+
+
+
+
 
 #################
 ## "Callbacks" ##
@@ -356,14 +445,14 @@ def main(_):
             #pose_input: window.pose,
             view_input: window.view,
             vtrans: window.vtrans['x'],
-            #vrot: window.vrot['z']
+            vrot: window.vrot['z']
         })
 
-        #res = sess.run(trans_weights_dense, feed_dict={
+        #res = sess.run(path_weights_dense, feed_dict={
         #    vtrans: window.vtrans['x'],
         #    vrot: 45 * math.pi/180
         #})
-        #print('trans_weights_dense', res, res.shape)
+        #print('path_weights_dense', res, res.shape)
 
         #window.vrot['z']
 
