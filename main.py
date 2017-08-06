@@ -9,7 +9,7 @@ from posevis import Window
 
 sess = tf.Session()
 
-dim      = 14
+dim      = 7
 dim_mid  = dim / 2;
 shape    = [dim, dim, dim]
 in_shape = (3,)
@@ -72,7 +72,7 @@ pose_input = tf.placeholder(tf.int64, shape=in_shape, name="PoseInput")
 view_input = tf.placeholder(tf.int64, shape=in_shape, name="ViewInput")
 
 view_decay = tf.Variable(tf.fill(shape, VT_ACTIVE_DECAY), name="ViewDecay")
-posecells  = tf.Variable(tf.ones(shape, tf.float32), name="PoseCells")
+posecells  = tf.Variable(tf.zeros(shape, tf.float32), name="PoseCells")
 
 # Generate self-connection weights
 excite_pdf = gen_pdf(1)
@@ -100,7 +100,7 @@ excite = tf.squeeze(tf.tensordot(posecells_reshaped, excite_weights, axes=3, nam
 #print('excite', res, res.shape)
 
 # Local Inhibit
-# FIXME: Reshape needed? Keep the shape and reshape once?
+# FIXME: Reshape needed? Keep the shape and reshape once? Well just don't `squeeze` `excite` first.
 excite_reshaped = tf.reshape(excite, [-1, 1, 1, dim, dim, dim])
 inhibi = tf.subtract(excite, tf.squeeze(tf.tensordot(excite_reshaped, inhibi_weights, axes=3, name="Inhibit")))
 #res = sess.run(inhibi)
@@ -155,7 +155,14 @@ energy = tf.maximum(
 
 # Inject energy given by decay
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1038
+# TODO: VT from camera's pointing in different directions. Relative rad.
+# `vt_delta_pc_th = vt_rad / (2.0*M_PI) * PC_DIM_TH;`
+# `double pc_th_corrected = pcvt->pc_th + vt_rad / (2.0*M_PI) * PC_DIM_TH;`
 inject = tf.scatter_nd_add(posecells, [view_input], [energy], name="Inject")
+#res = sess.run(inject, feed_dict={
+#    view_input: [0, 0, 0]
+#})
+#print('inject', res, res.shape)
 
 # Slightly restore decay and Limit to VT_ACTIVE_DECAY
 # https://github.com/mryellow/ratslam/blob/ratslam_ros/src/ratslam/posecell_network.cpp#L1063
@@ -174,6 +181,10 @@ def gen_trans_weights():
     val = []
     idx = []
     cnt = 0
+
+    # TODO: Scale velocity by size of time step (not really applicable to DQN agents which step evenly)
+    # `vtrans = vtrans * time_diff_s;`
+    # `vrot = vrot * time_diff_s;`
 
     vtranscell = tf.divide(vtrans, PC_CELL_X_SIZE)
 
@@ -281,6 +292,7 @@ def gen_rot_weights():
     weight = tf.mod(tf.divide(tf.abs(rads), PC_C_SIZE_TH), 1)
     weight = tf.where(tf.equal(weight, 0.0), 1.0, weight)
 
+    # TODO: `tf.sign()`
     sign_vrot = tf.cond(rads < 0, lambda: 1.0, lambda: -1.0)
 
     shifty1 = tf.cast(tf.multiply(sign_vrot, tf.floor(tf.divide(tf.abs(rads), PC_C_SIZE_TH))), dtype=tf.int32)
@@ -351,8 +363,12 @@ on_view_template = tf.assign(posecells, inject, name="OnViewTemplate")
 
 on_odo = tf.assign(posecells, trans)
 
-# Inject some energy at the start. (Why is this needed?)
-one_time = tf.assign(posecells, tf.scatter_nd_add(posecells, [[dim_mid,dim_mid,dim_mid]], [1]), name="OneTime")
+#find_best = tf.arg_max(posecells, dimension=0)
+find_best = tf.argmax(posecells, axis=0)
+
+# Inject some energy at the start.
+posecell_init = tf.assign(posecells, tf.scatter_nd_add(posecells, [[dim_mid,dim_mid,dim_mid]], [1]), name="InitPoseCell")
+posecell_init.eval(session=sess)
 
 def main(_):
     writer = tf.summary.FileWriter("/tmp/tf_posecell_graph", sess.graph)
@@ -365,12 +381,9 @@ def main(_):
 
     # Kickstart PoseCells
     window.pose = [dim_mid, dim_mid, dim_mid]
-    window.view = [dim_mid, dim_mid, dim_mid]
+    window.view = [-99, -99, -99]
     window.pose_last = window.pose[:]
     window.view_last = window.view[:]
-    sess.run(one_time, feed_dict={
-        pose_input: window.pose
-    })
 
     window.timestep = 0
 
@@ -381,20 +394,24 @@ def main(_):
         data = None
         tasks = []
         # TODO: Prevent injection into recent view templates
-
         if window.pose_last != window.pose:
             #print('pose', window.pose)
             print('vel', window.vtrans['x'], window.vrot['z'])
         #    tasks.append(on_odo)
-        if window.view_last != window.view:
+        #if window.view_last != window.view:
+        #    print('view', window.view)
+        #    tasks.append(on_view_template)
+        #    tasks.append(decay_restore)
+
+        if window.view[0] >= 0:
             print('view', window.view)
+            tasks.append(on_view_template)
+            tasks.append(decay_restore)
 
-
-        #if window.timestep % 10 == 0:
-        #tasks.append(on_view_template)
-        #tasks.append(decay_restore)
         tasks.append(process)
         tasks.append(on_odo)
+
+        #tasks.append(find_best)
 
         res = sess.run(tasks, feed_dict={
             #pose_input: window.pose,
@@ -402,6 +419,10 @@ def main(_):
             vtrans: window.vtrans['x'],
             vrot: window.vrot['z']
         })
+
+        #print(res)
+
+        #print('best', res[len(tasks)-1])
 
         window.pose_last = window.pose[:]
         window.view_last = window.view[:]

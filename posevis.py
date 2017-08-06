@@ -144,6 +144,16 @@ class Window(pyglet.window.Window):
 		glLoadIdentity()
 		gluLookAt(24, 20, 20, 0, 10, 4, 0, 1, 0)
 
+	def on_key_press(self, k, m):
+		binds = self.bindings
+		if k in binds:
+			if binds[k] == 'vt1':
+				self.view = [1,1,1]
+			if binds[k] == 'vt2':
+				self.view = [self.dim-1,self.dim-1,self.dim-1]
+			if binds[k] == 'vt3':
+				self.view = [self.dim/2,1,self.dim/2]
+
 	def on_key_release(self, k, m):
 		binds = self.bindings
 		if k in binds:
@@ -173,19 +183,16 @@ class Window(pyglet.window.Window):
 			if self.vrot['z'] < -359:
 				self.vrot['z'] = 0
 
-			if binds[k] == 'vt1':
-				self.view = [1,1,1]
-			if binds[k] == 'vt2':
-				self.view = [3,4,5]
-			if binds[k] == 'vt3':
-				self.view = [6,6,6]
-
 			if self.vtrans['x'] < 0:
 				self.vtrans['x'] = 0
 
 			self.pose[0] %= self.dim
 			self.pose[1] %= self.dim
 			self.pose[2] %= self.dim
+
+			# Haven't used this trick in decades!
+			self.view = [-99,-99,-99]
+
 			#print('on_key_release', self.pose[0], self.pose[1], self.pose[2])
 			return True
 		return False
