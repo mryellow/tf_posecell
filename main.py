@@ -7,6 +7,8 @@ import random
 from pyglet.gl import *
 from posevis import Window
 
+from weights import Weights
+
 sess = tf.Session()
 
 dim      = 7
@@ -21,52 +23,7 @@ PC_VT_RESTORE = 0.05
 VT_ACTIVE_DECAY = 1.0
 PC_CELL_X_SIZE = 1.0
 
-def norm2d(var, x, y, z):
-    return 1.0 / (var * math.sqrt(2.0 * math.pi)) \
-        * math.exp(( \
-            - (x - dim_mid) * (x - dim_mid) \
-            - (y - dim_mid) * (y - dim_mid) \
-            - (z - dim_mid) * (z - dim_mid) \
-        ) / (2.0 * var * var))
-
-def gen_pdf(var):
-    total = 0
-    res = []
-
-    for k in xrange(dim):
-        for j in xrange(dim):
-            for i in xrange(dim):
-                norm = norm2d(var, i, j, k)
-                res.append(norm)
-                total += norm
-
-    for x in xrange(len(res)):
-        res[x] /= total
-
-    return res
-
-# Weights for each PoseCell based on PDF
-def gen_weights(pdf):
-    print('Generating PDF weights...')
-    res = []
-    for k in xrange(dim):
-        res.append([])
-        for j in xrange(dim):
-            res[k].append([])
-            for i in xrange(dim):
-                # TODO: Sparsify, indexes and values, over a min limit
-                res[k][j].append(gen_weight(pdf, k, j, i))
-
-    return np.asarray(res)
-
-# Roll the PDF until aligned with this cell
-def gen_weight(pdf, x, y, z):
-    # Fully connected
-    res = np.roll(pdf, ((x-dim_mid) * dim * dim) + ((y-dim_mid) * dim) + (z-dim_mid))
-    # TODO: Locally connected "Activity Packets"
-    # [[left, most, corner], [smaller, p, d, f]]
-    res = np.reshape(res, shape)
-    return res
+weights = Weights(dim, dim)
 
 pose_input = tf.placeholder(tf.int64, shape=in_shape, name="PoseInput")
 view_input = tf.placeholder(tf.int64, shape=in_shape, name="ViewInput")
@@ -75,11 +32,11 @@ view_decay = tf.Variable(tf.fill(shape, VT_ACTIVE_DECAY), name="ViewDecay")
 posecells  = tf.Variable(tf.zeros(shape, tf.float32), name="PoseCells")
 
 # Generate self-connection weights
-excite_pdf = gen_pdf(1)
-inhibi_pdf = gen_pdf(2)
+excite_pdf = weights.pdf(1)
+inhibi_pdf = weights.pdf(2)
 
-excite_weights = tf.constant(gen_weights(excite_pdf), dtype=tf.float32, name="WeightsExcite")
-inhibi_weights = tf.constant(gen_weights(inhibi_pdf), dtype=tf.float32, name="WeightsInhibit")
+excite_weights = tf.constant(weights.attractor(excite_pdf), dtype=tf.float32, name="WeightsExcite")
+inhibi_weights = tf.constant(weights.attractor(inhibi_pdf), dtype=tf.float32, name="WeightsInhibit")
 
 # Initalise globals
 tf.global_variables_initializer().run(session=sess)
@@ -173,157 +130,8 @@ decay_restore = tf.assign(view_decay, tf.maximum(VT_ACTIVE_DECAY, tf.subtract(de
 ## Path Integration ##
 ######################
 
-## Translation
-vtrans = tf.placeholder(tf.float32, shape=[], name="vtransInput")
-
-def gen_trans_weights():
-    print('Generating Translation weights...')
-    val = []
-    idx = []
-    cnt = 0
-
-    # TODO: Scale velocity by size of time step (not really applicable to DQN agents which step evenly)
-    # `vtrans = vtrans * time_diff_s;`
-    # `vrot = vrot * time_diff_s;`
-
-    vtranscell = tf.divide(vtrans, PC_CELL_X_SIZE)
-
-    # Z axis
-    for k in xrange(dim):
-        trans_dir = k * PC_C_SIZE_TH #th index * size of each th in rad + angle_to_add (for reverse)
-
-        # Break down to one single quadrant
-        # `math.floor(trans_dir * 2 / math.pi)` gives number of quadrant.
-
-        trans_quad = math.floor(trans_dir * 2 / math.pi)
-        trans_dir = trans_dir - trans_quad * math.pi / 2
-
-        # Y axis
-        for j in xrange(dim):
-            # X axis
-            for i in xrange(dim):
-                weights = []
-
-                if trans_quad == 3.0:
-                    ne = [j, i]
-                    nw = [j-1, i]
-                    se = [j, i+1]
-                    sw = [j-1, i+1]
-                elif trans_quad == 2.0:
-                    ne = [j, i]
-                    nw = [j+1, i]
-                    se = [j+1, i]
-                    sw = [j+1, i+1]
-                elif trans_quad == 1.0:
-                    ne = [j, i]
-                    nw = [j+1, i]
-                    se = [j, i-1]
-                    sw = [j+1, i-1]
-                else:
-                    ne = [j, i]
-                    nw = [j, i-1]
-                    se = [j-1, i]
-                    sw = [j-1, i-1]
-
-                # Wrap edges
-                for card in xrange(len(ne)):
-                    if ne[card] < 0:
-                        ne[card] = dim-1
-                    if ne[card] > dim-1:
-                        ne[card] = 0
-                for card in xrange(len(nw)):
-                    if nw[card] < 0:
-                        nw[card] = dim-1
-                    if nw[card] > dim-1:
-                        nw[card] = 0
-                for card in xrange(len(se)):
-                    if se[card] < 0:
-                        se[card] = dim-1
-                    if se[card] > dim-1:
-                        se[card] = 0
-                for card in xrange(len(sw)):
-                    if sw[card] < 0:
-                        sw[card] = dim-1
-                    if sw[card] > dim-1:
-                        sw[card] = 0
-
-                # Note: At 45deg, 0.2 comes from either side and 0.5 from behind.
-
-                # weight_sw = vtranscell * vtranscell * cos(dir90) * sin(dir90);
-                weights.append(vtranscell * vtranscell * tf.cos(trans_dir) * tf.sin(trans_dir))
-                weight_val = weights[0]
-                weight_idx = [k,j,i,k,sw[0],sw[1]]
-                idx.append(weight_idx)
-                val.append(weight_val)
-
-                # weight_se = vtranscell * sin(dir90) * (1.0 - vtranscell * cos(dir90));
-                weights.append(vtranscell * tf.sin(trans_dir) * (1.0 - vtranscell * tf.cos(trans_dir)))
-                weight_val = weights[1]
-                weight_idx = [k,j,i,k,se[0],se[1]]
-                idx.append(weight_idx)
-                val.append(weight_val)
-
-                # weight_nw = vtranscell * cos(dir90) * (1.0 - vtranscell * sin(dir90));
-                weights.append(vtranscell * tf.cos(trans_dir) * (1.0 - vtranscell * tf.sin(trans_dir)))
-                weight_val = weights[2]
-                weight_idx = [k,j,i,k,nw[0],nw[1]]
-                idx.append(weight_idx)
-                val.append(weight_val)
-
-                # weight_ne = 1.0 - weight_sw - weight_se - weight_nw;
-                weight_val = 1.0 - weights[2] - weights[1] - weights[0]
-                weight_idx = [k,j,i,k,ne[0],ne[1]]
-                idx.append(weight_idx)
-                val.append(weight_val)
-
-    return idx, val
-
-## Rotation
-vrot = tf.placeholder(tf.float32, shape=[], name="vrotInput")
-
-def gen_rot_weights():
-    print('Generating Rotation weights...')
-    val = []
-    idx = []
-
-    # Convert to radians
-    rads = tf.multiply(vrot, math.pi/180)
-
-    weight = tf.mod(tf.divide(tf.abs(rads), PC_C_SIZE_TH), 1)
-    weight = tf.where(tf.equal(weight, 0.0), 1.0, weight)
-
-    # TODO: `tf.sign()`
-    sign_vrot = tf.cond(rads < 0, lambda: 1.0, lambda: -1.0)
-
-    shifty1 = tf.cast(tf.multiply(sign_vrot, tf.floor(tf.divide(tf.abs(rads), PC_C_SIZE_TH))), dtype=tf.int32)
-    shifty2 = tf.cast(tf.multiply(sign_vrot, tf.ceil(tf.divide(tf.abs(rads), PC_C_SIZE_TH))), dtype=tf.int32)
-
-    cond = lambda i: tf.greater(i, 0)
-    body = lambda i: tf.subtract(i, dim)
-    tf.while_loop(cond, body, [shifty1])
-    tf.while_loop(cond, body, [shifty2])
-
-    for k in xrange(dim):
-        newk1 = tf.mod(tf.subtract(k, shifty1), dim)
-        newk2 = tf.mod(tf.subtract(k, shifty2), dim)
-        for j in xrange(dim):
-            for i in xrange(dim):
-                #posecells[k][j][i] = pca_new[newk1][j][i] * (1.0 - weight) + pca_new[newk2][j][i] * weight;
-
-                weight_val = 1.0 - weight
-                weight_idx = [k,j,i,newk1,j,i]
-                idx.append(weight_idx)
-                val.append(weight_val)
-
-                weight_val = weight
-                weight_idx = [k,j,i,newk2,j,i]
-                idx.append(weight_idx)
-                val.append(weight_val)
-
-    return idx, val
-
-rots_idx, rots_val   = gen_rot_weights()
-trans_idx, trans_val = gen_trans_weights()
+rots_idx, rots_val   = weights.rotation()
+trans_idx, trans_val = weights.translation()
 
 trans_weights_dense = tf.sparse_to_dense(
     sparse_indices=trans_idx,
@@ -415,9 +223,9 @@ def main(_):
 
         res = sess.run(tasks, feed_dict={
             #pose_input: window.pose,
-            view_input: window.view,
-            vtrans: window.vtrans['x'],
-            vrot: window.vrot['z']
+            #view_input: window.view,
+            weights.vtrans: window.vtrans['x'],
+            weights.vrot: window.vrot['z']
         })
 
         #print(res)
