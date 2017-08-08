@@ -16,10 +16,11 @@ class Weights():
 
         self.vrot   = tf.placeholder(tf.float32, shape=[], name="vrotInput")
         self.vtrans = tf.placeholder(tf.float32, shape=[], name="vtransInput")
-        pass
-
 
     def norm2d(self, var, x, y, z):
+        """
+        Generate 2D PDF
+        """
         return 1.0 / (var * math.sqrt(2.0 * math.pi)) \
             * math.exp(( \
                 - (x - self.mid_xy) * (x - self.mid_xy) \
@@ -28,6 +29,9 @@ class Weights():
             ) / (2.0 * var * var))
 
     def pdf(self, var):
+        """
+        Generate and normalise 3D PDF
+        """
         total = 0
         res = []
 
@@ -43,9 +47,12 @@ class Weights():
 
         return res
 
-    # Weights for each PoseCell based on PDF
-    def attractor(self, pdf):
+    def attractor(self, var):
+        """
+        Weights for each PoseCell based on PDF
+        """
         print('Generating PDF weights...')
+        pdf = self.pdf(var)
         res = []
         for k in xrange(self.dim_th):
             res.append([])
@@ -57,8 +64,10 @@ class Weights():
 
         return np.asarray(res)
 
-    # Roll the PDF until aligned with this cell
     def displace_pdf(self, pdf, x, y, z):
+        """
+        Roll the PDF until aligned with this cell
+        """
         # Fully connected
         # TODO: Locally connected "Activity Packets"?
         # [[left, most, corner], [smaller, p, d, f]]
@@ -69,6 +78,9 @@ class Weights():
         )
 
     def translation(self):
+        """
+        Generating Translation weights
+        """
         print('Generating Translation weights...')
         val = []
         idx = []
@@ -171,6 +183,9 @@ class Weights():
         return idx, val
 
     def rotation(self):
+        """
+        Generating Rotation weights
+        """
         print('Generating Rotation weights...')
         val = []
         idx = []

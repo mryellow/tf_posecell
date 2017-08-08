@@ -80,37 +80,34 @@ class Window(pyglet.window.Window):
 	"""
 	is_event_handler = True
 
-	def __init__(self):
+	def __init__(self, dim_th, dim_xy):
 		super(Window, self).__init__(resizable=True, caption='PyVoxel')
 		self.voxel = VoxelEngine(20, 25, 20)
 		glClearColor(0.7, 0.7, 0.8, 1)
+
+		self.dim_th = dim_th
+		self.dim_xy = dim_xy
+
+		self.timestep = 0
 
 		self.trans_accel = 0.2
 		self.rot_accel = 1.0
 
 		self.bindings = {
-			key.W: 'up',
-			key.S: 'down',
-			key.A: 'left',
-			key.D: 'right',
-			key.Q: 'turn-left',
-			key.E: 'turn-right',
+			#key.W: 'up',
+			#key.S: 'down',
+			#key.A: 'left',
+			#key.D: 'right',
+			#key.Q: 'turn-left',
+			#key.E: 'turn-right',
 			key.LEFT: 'left',
 			key.RIGHT: 'right',
 			key.UP: 'up',
 			key.DOWN: 'down',
-			key.I: 'vt1',
-			key.J: 'vt2',
-			key.L: 'vt3',
+			#key.I: 'vt1',
+			#key.J: 'vt2',
+			#key.L: 'vt3',
 		}
-		#buttons = {}
-		#for k in self.bindings:
-		#	buttons[self.bindings[k]] = 0
-		#self.buttons = buttons
-
-		self.dim = None
-		self.pose = [0,0,0]
-		self.view = [0,0,0]
 
 		# In ROS speak:
 		# odo->twist.twist.linear.x, odo->twist.twist.angular.z
@@ -127,9 +124,6 @@ class Window(pyglet.window.Window):
 			'z': 0.0
 		}
 
-		self.pose_last = self.pose[:]
-		self.view_last = self.view[:]
-
 	def on_draw(self):
 		self.clear()
 		self.setup_3D()
@@ -144,59 +138,31 @@ class Window(pyglet.window.Window):
 		glLoadIdentity()
 		gluLookAt(24, 20, 20, 0, 10, 4, 0, 1, 0)
 
-	def on_key_press(self, k, m):
-		binds = self.bindings
-		if k in binds:
-			if binds[k] == 'vt1':
-				self.view = [1,1,1]
-			if binds[k] == 'vt2':
-				self.view = [self.dim-1,self.dim-1,self.dim-1]
-			if binds[k] == 'vt3':
-				self.view = [self.dim/2,1,self.dim/2]
+	#def on_key_press(self, k, m):
+	#	binds = self.bindings
+	#	if k in binds:
+	#		if binds[k] == 'vt1':
+	#			self.view = [1,1,1]
+	#		if binds[k] == 'vt2':
+	#			self.view = [self.dim-1,self.dim-1,self.dim-1]
+	#		if binds[k] == 'vt3':
+	#			self.view = [self.dim/2,1,self.dim/2]
 
 	def on_key_release(self, k, m):
 		binds = self.bindings
 		if k in binds:
 			if binds[k] == 'left':
-				self.pose[0] += 1
-			#	self.vrot['z'] -= 1
+				self.vrot['z'] -= self.rot_accel
 			if binds[k] == 'right':
-				self.pose[0] -= 1
-			#	self.vrot['z'] += 1
+				self.vrot['z'] += self.rot_accel
 			if binds[k] == 'up':
-				self.pose[1] += 1
 				self.vtrans['x'] += self.trans_accel
 			if binds[k] == 'down':
-				self.pose[1] -= 1
-				# FIXME: Reverse direction o vrot
-				if self.vtrans['x'] > 0:
-					self.vtrans['x'] -= self.trans_accel
-			if binds[k] == 'turn-left':
-				self.pose[2] += 1
-				self.vrot['z'] -= self.rot_accel
-			if binds[k] == 'turn-right':
-				self.pose[2] -= 1
-				self.vrot['z'] += self.rot_accel
+				self.vtrans['x'] -= self.trans_accel
 
-			if self.vrot['z'] > 359:
-				self.vrot['z'] = 0
-			if self.vrot['z'] < -359:
-				self.vrot['z'] = 0
-
+			# TODO: Reverse direction o vrot
 			if self.vtrans['x'] < 0:
 				self.vtrans['x'] = 0
 
-			self.pose[0] %= self.dim
-			self.pose[1] %= self.dim
-			self.pose[2] %= self.dim
-
-			# Haven't used this trick in decades!
-			self.view = [-99,-99,-99]
-
-			#print('on_key_release', self.pose[0], self.pose[1], self.pose[2])
 			return True
 		return False
-
-if __name__ == '__main__':
-    window = Window()
-    pyglet.app.run()
